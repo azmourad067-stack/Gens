@@ -1467,5 +1467,4 @@ def main():
 
 # Point d'entrée avec gestion d'erreurs avancée
 if __name__ == "__main__":
-    try:
         main()
