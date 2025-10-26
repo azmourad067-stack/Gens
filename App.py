@@ -72,41 +72,48 @@ class AdvancedRacingPredictor:
         self.cv_results = {}
         self.is_trained = False
         
-    def create_advanced_models(self):
-        """Crée une ensemble de modèles avancés"""
-        self.models = {
+    def create_advanced_models(self, n_samples):
+        """Crée une ensemble de modèles avancés adaptés à la taille des données"""
+        base_models = {
             'xgboost': xgb.XGBRegressor(
-                n_estimators=200,
-                max_depth=6,
+                n_estimators=100 if n_samples < 20 else 200,
+                max_depth=4 if n_samples < 15 else 6,
                 learning_rate=0.05,
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42
             ),
             'random_forest': RandomForestRegressor(
-                n_estimators=150,
-                max_depth=8,
-                min_samples_split=8,
-                min_samples_leaf=4,
+                n_estimators=100 if n_samples < 20 else 150,
+                max_depth=6 if n_samples < 15 else 8,
+                min_samples_split=5 if n_samples < 10 else 8,
+                min_samples_leaf=2 if n_samples < 10 else 4,
                 random_state=42,
                 n_jobs=-1
             ),
             'gradient_boosting': GradientBoostingRegressor(
-                n_estimators=100,
+                n_estimators=80 if n_samples < 20 else 100,
                 learning_rate=0.08,
-                max_depth=5,
-                min_samples_split=10,
+                max_depth=4 if n_samples < 15 else 5,
+                min_samples_split=8 if n_samples < 15 else 10,
                 random_state=42
-            ),
-            'neural_network': MLPRegressor(
-                hidden_layer_sizes=(64, 32, 16),
-                activation='relu',
-                learning_rate_init=0.001,
-                max_iter=500,
-                random_state=42,
-                early_stopping=True
             )
         }
+        
+        # Ajout du réseau de neurones seulement si assez de données
+        if n_samples >= 15:
+            base_models['neural_network'] = MLPRegressor(
+                hidden_layer_sizes=(32, 16) if n_samples < 30 else (64, 32, 16),
+                activation='relu',
+                learning_rate_init=0.001,
+                max_iter=300,
+                random_state=42,
+                early_stopping=True,
+                validation_fraction=0.2,  # Augmenté pour petites datasets
+                n_iter_no_change=10
+            )
+        
+        self.models = base_models
     
     def extract_comprehensive_features(self, music_str):
         """
@@ -174,21 +181,13 @@ class AdvancedRacingPredictor:
     
     def _calculate_recovery(self, positions):
         """Calcule la capacité à rebondir après une mauvaise performance"""
+        if len(positions) < 2:
+            return 0
         recoveries = 0
         for i in range(1, len(positions)):
             if positions[i] < positions[i-1]:  # Amélioration
                 recoveries += 1
-        return recoveries / (len(positions) - 1) if len(positions) > 1 else 0
-    
-    def extract_driver_stats(self, driver_info):
-        """Extrait les statistiques du driver/jockey"""
-        # Implémentation simplifiée - à adapter selon les données disponibles
-        return {
-            'driver_win_rate': 0.15,  # À remplacer par données réelles
-            'driver_place_rate': 0.35,
-            'driver_experience': 50,
-            'driver_recent_form': 0.6
-        }
+        return recoveries / (len(positions) - 1)
     
     def prepare_advanced_features(self, df, race_type="PLAT"):
         """
@@ -198,7 +197,7 @@ class AdvancedRacingPredictor:
         config = RACE_CONFIGS[race_type]
         
         # === FEATURES DE BASE AVANCÉES ===
-        features['odds_inv'] = 1 / (df['odds_numeric'] + 0.01)  # Évite division par zéro
+        features['odds_inv'] = 1 / (df['odds_numeric'] + 0.01)
         features['log_odds'] = np.log1p(df['odds_numeric'])
         features['odds_rank'] = df['odds_numeric'].rank(pct=True)
         
@@ -230,7 +229,6 @@ class AdvancedRacingPredictor:
             features['age_optimal'] = features['age'].apply(lambda x: 1 if 3.5 <= x <= 6.5 else 0)
             features['age_experience'] = np.log1p(features['age'])
         else:
-            # Valeurs par défaut raisonnables
             features['age'] = 4.5
             features['is_female'] = 0
             features['is_gelding'] = 0
@@ -263,23 +261,11 @@ class AdvancedRacingPredictor:
         features['form_rank'] = features['music_recent_form'].rank(pct=True)
         features['consistency_rank'] = features['music_consistency'].rank(pct=True)
         
-        # === SCORE COMPOSITE PERSONNALISÉ ===
-        features['composite_score'] = (
-            features['odds_inv'] * 0.3 +
-            features['music_recent_form'] * 0.25 +
-            features['music_consistency'] * 0.15 +
-            features['weight_advantage'] * 0.1 +
-            features['optimal_draw'] * config['draw_coef'] +
-            features['age_optimal'] * 0.05 +
-            features['music_win_rate'] * 0.1
-        )
-        
         return features.fillna(0)
     
     def create_synthetic_labels(self, X, race_type="PLAT"):
         """
         Crée des labels synthétiques réalistes basés sur les features
-        C'est le cœur du système d'apprentissage
         """
         config = RACE_CONFIGS[race_type]
         
@@ -308,10 +294,20 @@ class AdvancedRacingPredictor:
         
         return np.clip(y_synthetic, 0, 1)
     
-    def train_ensemble_model(self, X, y, cv_folds=5):
+    def train_ensemble_model(self, X, y):
         """
-        Entraînement d'un ensemble de modèles avec validation croisée
+        Entraînement d'un ensemble de modèles adapté à la taille des données
         """
+        n_samples = len(X)
+        
+        # Ajustement du nombre de folds selon la taille des données
+        if n_samples < 8:
+            cv_folds = 3
+        elif n_samples < 15:
+            cv_folds = 4
+        else:
+            cv_folds = 5
+            
         kf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
         
         # Normalisation des features
@@ -323,30 +319,41 @@ class AdvancedRacingPredictor:
         
         for name, model in self.models.items():
             try:
-                # Scores de validation croisée
-                scores = cross_val_score(model, X_scaled, y, cv=kf, scoring='r2', n_jobs=-1)
-                cv_scores[name] = {
-                    'mean_r2': scores.mean(),
-                    'std_r2': scores.std(),
-                    'scores': scores
-                }
+                # Pour les très petits datasets, on utilise une validation simple
+                if n_samples < 6:
+                    model.fit(X_scaled, y)
+                    pred = model.predict(X_scaled)
+                    r2 = r2_score(y, pred)
+                    cv_scores[name] = {
+                        'mean_r2': max(r2, 0),  # Évite les scores négatifs
+                        'std_r2': 0.1,
+                        'scores': [r2]
+                    }
+                else:
+                    # Validation croisée standard
+                    scores = cross_val_score(model, X_scaled, y, cv=kf, scoring='r2', n_jobs=-1)
+                    cv_scores[name] = {
+                        'mean_r2': max(scores.mean(), 0),
+                        'std_r2': scores.std(),
+                        'scores': scores
+                    }
+                    model.fit(X_scaled, y)
+                    pred = model.predict(X_scaled)
                 
-                # Entraînement du modèle
-                model.fit(X_scaled, y)
-                pred = model.predict(X_scaled)
                 predictions[name] = pred
                 
                 # Importance des features (si disponible)
                 if hasattr(model, 'feature_importances_'):
                     self.feature_importance[name] = dict(
                         sorted(zip(X.columns, model.feature_importances_), 
-                              key=lambda x: x[1], reverse=True)[:15]
+                              key=lambda x: x[1], reverse=True)[:10]
                     )
                     
             except Exception as e:
                 st.warning(f"⚠️ Erreur avec le modèle {name}: {str(e)}")
+                # Prédiction de fallback
                 predictions[name] = np.full(len(X), y.mean())
-                cv_scores[name] = {'mean_r2': 0, 'std_r2': 0, 'scores': [0]}
+                cv_scores[name] = {'mean_r2': 0.1, 'std_r2': 0.1, 'scores': [0.1]}
         
         return predictions, cv_scores
     
@@ -354,37 +361,39 @@ class AdvancedRacingPredictor:
         """
         Optimise les poids de l'ensemble pour maximiser la performance
         """
-        from scipy.optimize import minimize
-        
-        def objective(weights):
-            # Combinaison linéaire des prédictions
-            combined = sum(w * pred for w, pred in zip(weights, predictions.values()))
-            return -r2_score(y_true, combined)  # On maximise R²
-        
-        # Contraintes : poids positifs et somme à 1
-        constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
-        bounds = [(0, 1) for _ in predictions]
-        
-        # Initialisation équitable
-        x0 = np.ones(len(predictions)) / len(predictions)
+        # Méthode simplifiée pour petites datasets
+        if len(y_true) < 6:
+            # Poids égaux pour petites datasets
+            return np.ones(len(predictions)) / len(predictions)
         
         try:
+            from scipy.optimize import minimize
+            
+            def objective(weights):
+                combined = sum(w * pred for w, pred in zip(weights, predictions.values()))
+                return -r2_score(y_true, combined)
+            
+            constraints = ({'type': 'eq', 'fun': lambda w: np.sum(w) - 1})
+            bounds = [(0, 1) for _ in predictions]
+            x0 = np.ones(len(predictions)) / len(predictions)
+            
             result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=constraints)
             return result.x
         except:
-            # Retour aux poids par défaut en cas d'échec
-            return x0
+            return np.ones(len(predictions)) / len(predictions)
     
     def predict_with_confidence(self, X, race_type="PLAT"):
         """
-        Prédiction avec estimation de la confiance
+        Prédiction avec estimation de la confiance adaptée à la taille des données
         """
-        if len(X) < 4:
-            st.warning("⚠️ Données insuffisantes pour une prédiction fiable")
-            return np.zeros(len(X)), {}, np.zeros(len(X))
+        n_samples = len(X)
         
-        # Création des modèles
-        self.create_advanced_models()
+        if n_samples < 3:
+            st.warning("⚠️ Données insuffisantes pour une prédiction fiable")
+            return np.zeros(n_samples), {}, np.zeros(n_samples)
+        
+        # Création des modèles adaptés
+        self.create_advanced_models(n_samples)
         
         # Préparation des labels synthétiques
         y_synthetic = self.create_synthetic_labels(X, race_type)
@@ -394,7 +403,7 @@ class AdvancedRacingPredictor:
         
         if not predictions:
             st.error("❌ Aucun modèle n'a pu être entraîné")
-            return np.zeros(len(X)), {}, np.zeros(len(X))
+            return np.zeros(n_samples), {}, np.zeros(n_samples)
         
         # Optimisation des poids de l'ensemble
         optimal_weights = self.optimize_ensemble_weights(predictions, y_synthetic)
@@ -404,20 +413,23 @@ class AdvancedRacingPredictor:
             weight * pred for weight, pred in zip(optimal_weights, predictions.values())
         )
         
-        # Calcul de la confiance
-        confidence = self.calculate_advanced_confidence(final_predictions, X, cv_scores)
+        # Calcul de la confiance adaptatif
+        confidence = self.calculate_adaptive_confidence(final_predictions, X, cv_scores, n_samples)
         
         self.is_trained = True
         self.cv_results = cv_scores
         
         return final_predictions, cv_scores, confidence
     
-    def calculate_advanced_confidence(self, predictions, X, cv_scores):
+    def calculate_adaptive_confidence(self, predictions, X, cv_scores, n_samples):
         """
-        Calcule un score de confiance avancé basé sur plusieurs facteurs
+        Calcule un score de confiance adapté à la taille des données
         """
-        if len(predictions) < 3:
-            return np.ones(len(predictions)) * 0.5
+        if n_samples < 3:
+            return np.ones(n_samples) * 0.3
+        
+        # Facteur de base selon la taille des données
+        size_factor = min(n_samples / 20, 1.0)  # Normalisé par rapport à 20 échantillons
         
         # 1. Variabilité des prédictions
         pred_variance = np.var(predictions)
@@ -426,29 +438,22 @@ class AdvancedRacingPredictor:
         # 2. Qualité des données
         data_quality = 1 - (X.isna().sum(axis=1) / len(X.columns))
         
-        # 3. Performance des modèles (moyenne R²)
+        # 3. Performance des modèles
         avg_r2 = np.mean([scores['mean_r2'] for scores in cv_scores.values()])
-        model_confidence = max(0, min(1, avg_r2 + 0.5))  # Normalisé entre 0 et 1
+        model_confidence = max(0, min(1, avg_r2 + 0.3))
         
-        # 4. Consistance des prédictions
-        if len(predictions) > 5:
-            sorted_pred = np.sort(predictions)
-            consistency = 1 - (sorted_pred[-1] - sorted_pred[0])
-        else:
-            consistency = 0.7
-        
-        # Combinaison des facteurs de confiance
+        # Combinaison avec facteur de taille
         confidence = (
             confidence_variance * 0.3 +
             data_quality.values * 0.3 +
             model_confidence * 0.2 +
-            consistency * 0.2
+            size_factor * 0.2
         )
         
         return np.clip(confidence, 0.1, 0.95)
 
 # =============================================================================
-# FONCTIONS EXISTANTES AMÉLIORÉES
+# FONCTIONS EXISTANTES
 # =============================================================================
 
 def safe_convert(value, convert_func, default=0):
@@ -461,9 +466,7 @@ def safe_convert(value, convert_func, default=0):
         return default
 
 def prepare_enhanced_data(df):
-    """
-    Préparation des données avec gestion d'erreurs améliorée
-    """
+    """Préparation des données avec gestion d'erreurs améliorée"""
     df = df.copy()
     
     # Conversion robuste des cotes
@@ -472,12 +475,11 @@ def prepare_enhanced_data(df):
     # Conversion des numéros de corde
     df['draw_numeric'] = df['Numéro de corde'].apply(lambda x: safe_convert(x, int, 1))
     
-    # Extraction du poids avec gestion d'erreurs
+    # Extraction du poids
     def extract_weight_enhanced(poids_str):
         if pd.isna(poids_str):
             return 60.0
         try:
-            # Recherche de nombres avec décimales
             matches = re.findall(r'\d+[.,]\d+|\d+', str(poids_str))
             if matches:
                 return float(matches[0].replace(',', '.'))
@@ -583,7 +585,7 @@ def main():
     st.markdown('<h1 class="main-header">🏇 Système Prédictif Hippique Avancé</h1>', unsafe_allow_html=True)
     st.markdown("*Apprentissage automatique avec pondération automatique des facteurs*")
     
-    # Sidebar améliorée
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuration Avancée")
         
@@ -601,22 +603,11 @@ def main():
         enable_correlation = st.checkbox("📈 Analyse de corrélation", value=True)
         enable_feature_importance = st.checkbox("🔍 Importance des features", value=True)
         confidence_threshold = st.slider("🎯 Seuil de confiance", 0.5, 0.95, 0.7, 0.05)
-        
-        st.subheader("ℹ️ À propos du système")
-        st.info("""
-        **Fonctionnalités avancées:**
-        - 🧠 Ensemble de modèles ML
-        - 📊 Pondération automatique
-        - 🎯 Scores de confiance
-        - 🔄 Validation croisée
-        - 📈 Analyse de corrélation
-        """)
     
-    # SECTION URL BIEN VISIBLE
+    # SECTION URL
     st.markdown("---")
     st.header("🔍 Analyse d'URL de Course")
     
-    # Container spécial pour l'input URL
     with st.container():
         st.markdown('<div class="url-input">', unsafe_allow_html=True)
         
@@ -693,6 +684,9 @@ def main():
             st.error("❌ Aucune donnée valide après préparation")
             return
         
+        # Affichage info dataset
+        st.info(f"📊 **Dataset**: {len(df_prepared)} chevaux | Cotes: {df_prepared['odds_numeric'].min():.1f}-{df_prepared['odds_numeric'].max():.1f}")
+        
         # Détection du type de course
         if race_type == "AUTO":
             weight_std = df_prepared['weight_kg'].std()
@@ -714,18 +708,18 @@ def main():
         # === MACHINE LEARNING AVANCÉ ===
         predictor = AdvancedRacingPredictor()
         
-        with st.spinner("🤖 Entraînement des modèles ML avancés..."):
+        with st.spinner("🤖 Entraînement des modèles ML adaptatifs..."):
             try:
                 # Préparation des features avancées
                 X_ml = predictor.prepare_advanced_features(df_prepared, detected_type)
                 
-                # Affichage du nombre de features
-                st.info(f"🔬 **{len(X_ml.columns)} features** créées pour l'analyse ML")
+                # Affichage info features
+                st.info(f"🔬 **{len(X_ml.columns)} features** créées | **Samples**: {len(X_ml)}")
                 
                 # Prédiction avec confiance
                 ml_predictions, ml_results, confidence_scores = predictor.predict_with_confidence(X_ml, detected_type)
                 
-                # Normalisation des prédictions ML
+                # Normalisation des prédictions
                 if len(ml_predictions) > 0 and ml_predictions.max() != ml_predictions.min():
                     ml_predictions = (ml_predictions - ml_predictions.min()) / (ml_predictions.max() - ml_predictions.min())
                 
@@ -736,19 +730,14 @@ def main():
                 
                 # Affichage des métriques ML
                 if ml_results:
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        if 'xgboost' in ml_results:
-                            st.metric("🎯 R² XGBoost", f"{ml_results['xgboost']['mean_r2']:.3f}")
-                    with col2:
-                        if 'random_forest' in ml_results:
-                            st.metric("🌲 R² RF", f"{ml_results['random_forest']['mean_r2']:.3f}")
-                    with col3:
-                        if 'gradient_boosting' in ml_results:
-                            st.metric("📈 R² GB", f"{ml_results['gradient_boosting']['mean_r2']:.3f}")
-                    with col4:
-                        avg_confidence = confidence_scores.mean() if confidence_scores is not None else 0
-                        st.metric("🎯 Confiance Moy.", f"{avg_confidence:.1%}")
+                    cols = st.columns(min(4, len(ml_results)))
+                    for idx, (name, scores) in enumerate(ml_results.items()):
+                        with cols[idx % len(cols)]:
+                            st.metric(f"🎯 R² {name}", f"{scores['mean_r2']:.3f}")
+                    
+                    # Confiance moyenne
+                    avg_confidence = confidence_scores.mean()
+                    st.metric("📊 Confiance Moyenne", f"{avg_confidence:.1%}")
                 
             except Exception as e:
                 st.error(f"⚠️ Erreur ML: {e}")
@@ -760,7 +749,7 @@ def main():
                 df_prepared['confidence'] = np.ones(len(df_prepared)) * 0.5
         
         # === SCORE FINAL ===
-        ml_weight = 0.7  # Poids du ML
+        ml_weight = 0.7
         df_prepared['score_final'] = (1 - ml_weight) * (1 / (df_prepared['odds_numeric'] + 0.1)) + ml_weight * df_prepared['ml_score']
         
         # === CLASSEMENT ===
@@ -771,7 +760,7 @@ def main():
         st.markdown("---")
         st.subheader("🏆 Classement Final avec Confiance")
         
-        # Préparation du DataFrame d'affichage
+        # Préparation affichage
         display_cols = ['rang', 'Nom', 'Cote', 'Numéro de corde', 'Poids', 'score_final', 'confidence']
         display_df = df_ranked[[col for col in display_cols if col in df_ranked.columns]].copy()
         
@@ -781,7 +770,7 @@ def main():
         if 'confidence' in display_df.columns:
             display_df['Confiance'] = display_df['confidence'].apply(lambda x: f"{x:.1%}")
         
-        st.dataframe(display_df, use_container_width=True, height=400)
+        st.dataframe(display_df, use_container_width=True)
 
 if __name__ == "__main__":
     main()
