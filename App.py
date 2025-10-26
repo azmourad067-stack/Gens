@@ -451,6 +451,15 @@ class AdvancedRacingPredictor:
 # FONCTIONS EXISTANTES AMÉLIORÉES
 # =============================================================================
 
+def safe_convert(value, convert_func, default=0):
+    try:
+        if pd.isna(value):
+            return default
+        cleaned = str(value).replace(',', '.').strip()
+        return convert_func(cleaned)
+    except:
+        return default
+
 def prepare_enhanced_data(df):
     """
     Préparation des données avec gestion d'erreurs améliorée
@@ -484,23 +493,93 @@ def prepare_enhanced_data(df):
     
     return df
 
-def analyze_feature_correlations(X, target):
-    """
-    Analyse les corrélations entre les features et la target
-    """
-    correlations = {}
-    for col in X.columns:
-        if col != target:
-            corr = np.corrcoef(X[col], target)[0, 1]
-            correlations[col] = abs(corr)  # Valeur absolue
-    
-    return dict(sorted(correlations.items(), key=lambda x: x[1], reverse=True))
+@st.cache_data(ttl=300)
+def scrape_race_data(url):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            return None, f"Erreur HTTP {response.status_code}"
 
-# =============================================================================
-# INTERFACE STREAMLIT AMÉLIORÉE
-# =============================================================================
+        soup = BeautifulSoup(response.content, 'html.parser')
+        horses_data = []
+        
+        table = soup.find('table')
+        if not table:
+            return None, "Aucun tableau trouvé"
+            
+        rows = table.find_all('tr')[1:]
+        
+        for row in rows:
+            cols = row.find_all(['td', 'th'])
+            if len(cols) >= 4:
+                horses_data.append({
+                    "Numéro de corde": cols[0].get_text(strip=True),
+                    "Nom": cols[1].get_text(strip=True),
+                    "Cote": cols[-1].get_text(strip=True),
+                    "Poids": cols[-2].get_text(strip=True) if len(cols) > 4 else "60.0",
+                    "Musique": cols[2].get_text(strip=True) if len(cols) > 5 else "",
+                    "Âge/Sexe": cols[3].get_text(strip=True) if len(cols) > 6 else "",
+                })
+
+        if not horses_data:
+            return None, "Aucune donnée extraite"
+            
+        return pd.DataFrame(horses_data), "Succès"
+        
+    except Exception as e:
+        return None, f"Erreur: {str(e)}"
+
+def generate_sample_data(data_type="plat"):
+    if data_type == "plat":
+        return pd.DataFrame({
+            'Nom': ['Thunder Bolt', 'Lightning Star', 'Storm King', 'Rain Dance', 'Wind Walker', 'Fire Dancer', 'Ocean Wave'],
+            'Numéro de corde': ['1', '2', '3', '4', '5', '6', '7'],
+            'Cote': ['3.2', '4.8', '7.5', '6.2', '9.1', '12.5', '15.0'],
+            'Poids': ['56.5', '57.0', '58.5', '59.0', '57.5', '60.0', '61.5'],
+            'Musique': ['1a2a3a1a', '2a1a4a3a', '3a3a1a2a', '1a4a2a1a', '4a2a5a3a', '5a3a6a4a', '6a5a7a8a'],
+            'Âge/Sexe': ['4H', '5M', '3F', '6H', '4M', '5H', '4F']
+        })
+    elif data_type == "attele":
+        return pd.DataFrame({
+            'Nom': ['Rapide Éclair', 'Foudre Noire', 'Vent du Nord', 'Tempête Rouge', 'Orage Bleu', 'Cyclone Vert'],
+            'Numéro de corde': ['1', '2', '3', '4', '5', '6'],
+            'Cote': ['4.2', '8.5', '15.0', '3.8', '6.8', '10.2'],
+            'Poids': ['68.0', '68.0', '68.0', '68.0', '68.0', '68.0'],
+            'Musique': ['2a1a4a1a', '4a3a2a5a', '6a5a8a7a', '1a2a1a3a', '3a4a5a2a', '5a6a4a8a'],
+            'Âge/Sexe': ['5H', '6M', '4F', '7H', '5M', '6H']
+        })
+    else:
+        return pd.DataFrame({
+            'Nom': ['Ace Impact', 'Torquator Tasso', 'Adayar', 'Tarnawa', 'Chrono Genesis', 'Mishriff', 'Love'],
+            'Numéro de corde': ['1', '2', '3', '4', '5', '6', '7'],
+            'Cote': ['3.2', '4.8', '7.5', '6.2', '9.1', '5.5', '11.0'],
+            'Poids': ['59.5', '59.5', '59.5', '58.5', '58.5', '59.0', '58.0'],
+            'Musique': ['1a1a2a1a', '1a3a1a2a', '2a1a4a1a', '1a2a1a3a', '3a1a2a1a', '1a1a1a2a', '2a3a1a4a'],
+            'Âge/Sexe': ['4H', '5H', '4H', '5F', '5F', '5H', '4F']
+        })
 
 def main():
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1e3a8a;
+        text-align: center;
+        margin-bottom: 1rem;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    .url-input {
+        background-color: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        border: 2px solid #e9ecef;
+        margin-bottom: 20px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.markdown('<h1 class="main-header">🏇 Système Prédictif Hippique Avancé</h1>', unsafe_allow_html=True)
     st.markdown("*Apprentissage automatique avec pondération automatique des facteurs*")
     
@@ -533,12 +612,176 @@ def main():
         - 📈 Analyse de corrélation
         """)
     
-    # [Le reste du code Streamlit reste similaire mais utilise les nouvelles classes]
+    # SECTION URL BIEN VISIBLE
+    st.markdown("---")
+    st.header("🔍 Analyse d'URL de Course")
     
-    # Initialisation du prédicteur avancé
-    predictor = AdvancedRacingPredictor()
+    # Container spécial pour l'input URL
+    with st.container():
+        st.markdown('<div class="url-input">', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            url = st.text_input(
+                "🌐 **URL de la course:**",
+                placeholder="https://example-racing-site.com/course/123",
+                key="url_input"
+            )
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            analyze_button = st.button("🔍 Analyser", type="primary", use_container_width=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # [Intégration avec l'interface existante...]
+    df_final = None
+    
+    # Traitement de l'URL
+    if analyze_button and url:
+        with st.spinner("🔄 Extraction des données en cours..."):
+            df, message = scrape_race_data(url)
+            if df is not None:
+                st.success(f"✅ {len(df)} chevaux extraits avec succès")
+                st.dataframe(df.head(), use_container_width=True)
+                df_final = df
+            else:
+                st.error(f"❌ {message}")
+    
+    # Autres onglets
+    tab1, tab2 = st.tabs(["📁 Upload CSV", "🧪 Données de Test"])
+    
+    with tab1:
+        st.subheader("📤 Upload de fichier CSV")
+        st.markdown("Format attendu: `Nom, Numéro de corde, Cote, Poids, Musique, Âge/Sexe`")
+        uploaded_file = st.file_uploader("Choisir un fichier CSV", type="csv", key="csv_uploader")
+        if uploaded_file:
+            try:
+                df_final = pd.read_csv(uploaded_file)
+                st.success(f"✅ {len(df_final)} chevaux chargés")
+                st.dataframe(df_final.head(), use_container_width=True)
+            except Exception as e:
+                st.error(f"❌ Erreur de lecture: {e}")
+    
+    with tab2:
+        st.subheader("🧪 Données de Test")
+        st.markdown("Tester l'analyseur avec des données pré-chargées")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🏃 Test Plat", use_container_width=True):
+                df_final = generate_sample_data("plat")
+                st.success("✅ Données PLAT chargées (7 chevaux)")
+        with col2:
+            if st.button("🚗 Test Attelé", use_container_width=True):
+                df_final = generate_sample_data("attele")
+                st.success("✅ Données ATTELÉ chargées (6 chevaux)")
+        with col3:
+            if st.button("⭐ Test Premium", use_container_width=True):
+                df_final = generate_sample_data("premium")
+                st.success("✅ Données PREMIUM chargées (7 chevaux)")
+        
+        if df_final is not None:
+            st.dataframe(df_final, use_container_width=True)
+    
+    # === ANALYSE PRINCIPALE ===
+    if df_final is not None and len(df_final) > 0:
+        st.markdown("---")
+        st.header("🎯 Analyse et Prédictions ML")
+        
+        df_prepared = prepare_enhanced_data(df_final)
+        if len(df_prepared) == 0:
+            st.error("❌ Aucune donnée valide après préparation")
+            return
+        
+        # Détection du type de course
+        if race_type == "AUTO":
+            weight_std = df_prepared['weight_kg'].std()
+            if weight_std > 2.5:
+                detected_type = "PLAT"
+                reason = "Grande variation de poids (handicap)"
+            elif df_prepared['weight_kg'].mean() > 65 and weight_std < 1.5:
+                detected_type = "ATTELE_AUTOSTART"
+                reason = "Poids uniformes élevés (attelé)"
+            else:
+                detected_type = "PLAT"
+                reason = "Configuration par défaut"
+            
+            st.info(f"🤖 **Type détecté**: {detected_type} | **Raison**: {reason}")
+        else:
+            detected_type = race_type
+            st.info(f"📋 **Type sélectionné**: {RACE_CONFIGS[detected_type]['description']}")
+        
+        # === MACHINE LEARNING AVANCÉ ===
+        predictor = AdvancedRacingPredictor()
+        
+        with st.spinner("🤖 Entraînement des modèles ML avancés..."):
+            try:
+                # Préparation des features avancées
+                X_ml = predictor.prepare_advanced_features(df_prepared, detected_type)
+                
+                # Affichage du nombre de features
+                st.info(f"🔬 **{len(X_ml.columns)} features** créées pour l'analyse ML")
+                
+                # Prédiction avec confiance
+                ml_predictions, ml_results, confidence_scores = predictor.predict_with_confidence(X_ml, detected_type)
+                
+                # Normalisation des prédictions ML
+                if len(ml_predictions) > 0 and ml_predictions.max() != ml_predictions.min():
+                    ml_predictions = (ml_predictions - ml_predictions.min()) / (ml_predictions.max() - ml_predictions.min())
+                
+                df_prepared['ml_score'] = ml_predictions
+                df_prepared['confidence'] = confidence_scores
+                
+                st.success("✅ Modèles ML entraînés avec succès")
+                
+                # Affichage des métriques ML
+                if ml_results:
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        if 'xgboost' in ml_results:
+                            st.metric("🎯 R² XGBoost", f"{ml_results['xgboost']['mean_r2']:.3f}")
+                    with col2:
+                        if 'random_forest' in ml_results:
+                            st.metric("🌲 R² RF", f"{ml_results['random_forest']['mean_r2']:.3f}")
+                    with col3:
+                        if 'gradient_boosting' in ml_results:
+                            st.metric("📈 R² GB", f"{ml_results['gradient_boosting']['mean_r2']:.3f}")
+                    with col4:
+                        avg_confidence = confidence_scores.mean() if confidence_scores is not None else 0
+                        st.metric("🎯 Confiance Moy.", f"{avg_confidence:.1%}")
+                
+            except Exception as e:
+                st.error(f"⚠️ Erreur ML: {e}")
+                # Fallback vers méthode simple
+                traditional_score = 1 / (df_prepared['odds_numeric'] + 0.1)
+                if traditional_score.max() != traditional_score.min():
+                    traditional_score = (traditional_score - traditional_score.min()) / (traditional_score.max() - traditional_score.min())
+                df_prepared['ml_score'] = traditional_score
+                df_prepared['confidence'] = np.ones(len(df_prepared)) * 0.5
+        
+        # === SCORE FINAL ===
+        ml_weight = 0.7  # Poids du ML
+        df_prepared['score_final'] = (1 - ml_weight) * (1 / (df_prepared['odds_numeric'] + 0.1)) + ml_weight * df_prepared['ml_score']
+        
+        # === CLASSEMENT ===
+        df_ranked = df_prepared.sort_values('score_final', ascending=False).reset_index(drop=True)
+        df_ranked['rang'] = range(1, len(df_ranked) + 1)
+        
+        # === AFFICHAGE DES RÉSULTATS ===
+        st.markdown("---")
+        st.subheader("🏆 Classement Final avec Confiance")
+        
+        # Préparation du DataFrame d'affichage
+        display_cols = ['rang', 'Nom', 'Cote', 'Numéro de corde', 'Poids', 'score_final', 'confidence']
+        display_df = df_ranked[[col for col in display_cols if col in df_ranked.columns]].copy()
+        
+        # Formatage
+        if 'score_final' in display_df.columns:
+            display_df['Score'] = display_df['score_final'].apply(lambda x: f"{x:.3f}")
+        if 'confidence' in display_df.columns:
+            display_df['Confiance'] = display_df['confidence'].apply(lambda x: f"{x:.1%}")
+        
+        st.dataframe(display_df, use_container_width=True, height=400)
 
 if __name__ == "__main__":
     main()
