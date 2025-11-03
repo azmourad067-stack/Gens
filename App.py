@@ -1,646 +1,397 @@
+"""
+🏇 Analyseur Hippique IA Pro v3 (Deep Learning + Calibration)
+- Streamlit + TensorFlow Keras
+- Sauvegarde du modèle et scaler (apprentissage continu possible)
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import requests
-from bs4 import BeautifulSoup
 import re
-import json
 from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import os
+import joblib
 
-# ML avancé avec Deep Learning
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
-from sklearn.linear_model import Ridge, ElasticNet
-from sklearn.preprocessing import StandardScaler, RobustScaler, LabelEncoder
-from sklearn.model_selection import cross_val_score, KFold, train_test_split
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+# sklearn
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, accuracy_score, log_loss
+from sklearn.linear_model import LogisticRegression
+from sklearn.inspection import permutation_importance
 
-# Deep Learning
+# tensorflow
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-import warnings
-warnings.filterwarnings('ignore')
+from tensorflow.keras.callbacks import EarlyStopping
 
-st.set_page_config(
-    page_title="🏇 Analyseur Hippique IA Pro+",
-    page_icon="🏇",
-    layout="wide"
-)
+# plotting
+import plotly.express as px
 
-st.markdown("""
-<style>
-.main-header {
-    font-size: 3rem;
-    color: #1e3a8a;
-    text-align: center;
-    margin-bottom: 2rem;
-    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-}
-.metric-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 1.2rem;
-    border-radius: 12px;
-    color: white;
-    text-align: center;
-    margin: 0.5rem 0;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
-.prediction-box {
-    border-left: 5px solid #f59e0b;
-    padding: 1rem 1rem 1rem 1.5rem;
-    background: linear-gradient(90deg, #fffbeb 0%, #ffffff 100%);
-    margin: 1rem 0;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-.confidence-high { color: #10b981; font-weight: bold; }
-.confidence-medium { color: #f59e0b; font-weight: bold; }
-.confidence-low { color: #ef4444; font-weight: bold; }
-.param-active { background-color: #10b981; color: white; padding: 2px 8px; border-radius: 4px; }
-.param-inactive { background-color: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="🏇 Analyseur Hippique IA Pro v3 (DL)", layout="wide")
 
-class AdvancedHorseRacingML:
-    def __init__(self, params):
-        self.params = params  # Stocker les paramètres
-        self.base_models = {}
-        self._initialize_models()
-        
-        # Modèle Deep Learning
-        self.nn_model = None
-        self.scaler = RobustScaler()
-        self.label_encoders = {}
-        self.feature_importance = {}
-        self.cv_scores = {}
-        self.is_trained = False
-    
-    def _initialize_models(self):
-        """Initialise les modèles selon les paramètres sélectionnés"""
-        if self.params['use_rf']:
-            self.base_models['random_forest'] = RandomForestRegressor(
-                n_estimators=200, max_depth=10, min_samples_split=8,
-                min_samples_leaf=3, random_state=42, n_jobs=-1
-            )
-        
-        if self.params['use_gb']:
-            self.base_models['gradient_boosting'] = GradientBoostingRegressor(
-                n_estimators=150, learning_rate=0.08, max_depth=6,
-                min_samples_split=10, random_state=42
-            )
-        
-        if self.params['use_ridge']:
-            self.base_models['ridge'] = Ridge(alpha=1.0, random_state=42)
-        
-        if self.params['use_elastic']:
-            self.base_models['elastic'] = ElasticNet(alpha=0.5, l1_ratio=0.5, random_state=42)
-    
-    def build_neural_network(self, input_dim):
-        """Construction d'un réseau de neurones profond"""
-        if not self.params['use_nn']:
-            return None
-            
-        model = Sequential([
-            Dense(128, activation='relu', input_shape=(input_dim,)),
-            BatchNormalization(),
-            Dropout(0.3),
-            
-            Dense(64, activation='relu'),
-            BatchNormalization(),
-            Dropout(0.3),
-            
-            Dense(32, activation='relu'),
-            BatchNormalization(),
-            Dropout(0.2),
-            
-            Dense(16, activation='relu'),
-            Dropout(0.2),
-            
-            Dense(1, activation='sigmoid')
-        ])
-        
-        model.compile(
-            optimizer=Adam(learning_rate=0.001),
-            loss='mse',
-            metrics=['mae', 'mse']
-        )
-        
-        return model
-    
-    def parse_music_notation(self, music_str):
-        """Analyse avancée de la notation musicale"""
-        if pd.isna(music_str) or music_str == '':
-            return np.zeros(10)
-        
-        music = str(music_str)
-        positions = []
-        
-        # Extraction des positions
-        for char in music.split():
-            if char.endswith('p') and char[:-1].isdigit():
-                positions.append(int(char[:-1]))
-        
-        if not positions:
-            # Fallback: chercher tous les nombres
-            numbers = re.findall(r'\d+', music)
-            positions = [int(n) for n in numbers if int(n) > 0]
-        
-        if not positions:
-            return np.zeros(10)
-        
-        # Features avancées
-        features = {
-            'mean_position': np.mean(positions),
-            'std_position': np.std(positions),
-            'min_position': np.min(positions),
-            'max_position': np.max(positions),
-            'win_rate': positions.count(1) / len(positions),
-            'top3_rate': sum(1 for p in positions if p <= 3) / len(positions),
-            'recent_form': np.mean(positions[:min(3, len(positions))]) if positions else 5,
-            'consistency': 1 / (np.std(positions) + 0.1),
-            'improvement_trend': self.calculate_trend(positions),
-            'performance_count': len(positions)
-        }
-        
-        return np.array(list(features.values()))
-    
-    def calculate_trend(self, positions):
-        """Calcule la tendance d'amélioration"""
-        if len(positions) < 2:
-            return 0
-        
-        recent = positions[:min(5, len(positions))]
-        if len(recent) < 2:
-            return 0
-            
-        x = np.arange(len(recent))
-        slope, _ = np.polyfit(x, recent, 1)
-        return -slope
-    
-    def prepare_advanced_features_from_csv(self, df):
-        """Préparation des features à partir du format CSV"""
-        features = pd.DataFrame()
-        
-        # === FEATURES DE BASE AVEC PARAMÈTRES ===
-        if self.params['weight_odds'] > 0:
-            features['cote_direct'] = df['cotedirect'].fillna(50)
-            features['cote_prob'] = df['coteprob'].fillna(50)
-            features['odds_inv'] = 1 / (features['cote_direct'] + 0.1)
-            features['log_odds'] = np.log1p(features['cote_direct'])
-        
-        # === FEATURES HISTORIQUES AVEC PARAMÈTRES ===
-        if self.params['weight_historical'] > 0:
-            features['age'] = df['age'].fillna(4)
-            features['sexe'] = df['sexe'].map({'M': 0, 'F': 1, 'H': 0}).fillna(0)
-            features['recence'] = df['recence'].fillna(100)
-            
-            # Statistiques cheval
-            features['courses_cheval'] = df['coursescheval'].fillna(0)
-            features['victoires_cheval'] = df['victoirescheval'].fillna(0)
-            features['places_cheval'] = df['placescheval'].fillna(0)
-            features['win_rate_cheval'] = features['victoires_cheval'] / (features['courses_cheval'] + 1)
-            features['place_rate_cheval'] = features['places_cheval'] / (features['courses_cheval'] + 1)
-            
-            # Analyse musicale
-            if 'musiqueche' in df.columns:
-                music_features = df['musiqueche'].apply(self.parse_music_notation)
-                music_df = pd.DataFrame(music_features.tolist(), 
-                                      columns=[f'music_{i}' for i in range(10)])
-                features = pd.concat([features, music_df], axis=1)
-        
-        # === FEATURES JOCKEY/ENTRAÎNEUR AVEC PARAMÈTRES ===
-        if self.params['weight_jockey'] > 0:
-            features['courses_jockey'] = df['coursesjockey'].fillna(0)
-            features['victoires_jockey'] = df['victoiresjockey'].fillna(0)
-            features['places_jockey'] = df['placejockey'].fillna(0)
-            features['win_rate_jockey'] = features['victoires_jockey'] / (features['courses_jockey'] + 1)
-            features['place_rate_jockey'] = features['places_jockey'] / (features['courses_jockey'] + 1)
-            
-            features['courses_entraineur'] = df['coursesentraineur'].fillna(0)
-            features['victoires_entraineur'] = df['victoiresentraineur'].fillna(0)
-            features['win_rate_entraineur'] = features['victoires_entraineur'] / (features['courses_entraineur'] + 1)
-        
-        # === FEATURES DE POSITION (toujours incluses) ===
-        features['num_corde'] = df['numero'].fillna(1)
-        features['partant'] = df['partant'].fillna(1)
-        
-        # === FEATURES D'INTERACTION ===
-        if self.params['weight_historical'] > 0 and self.params['weight_jockey'] > 0:
-            features['interaction_jockey_cheval'] = features.get('win_rate_jockey', 0) * features.get('win_rate_cheval', 0)
-            features['interaction_entraineur_cheval'] = features.get('win_rate_entraineur', 0) * features.get('win_rate_cheval', 0)
-        
-        # === GAINS (toujours inclus) ===
-        features['gains_carriere'] = np.log1p(df['gainsCarriere'].fillna(0))
-        features['gains_victoires'] = np.log1p(df['gainsVictoires'].fillna(0))
-        features['gains_annee_cours'] = np.log1p(df['gainsAnneeEnCours'].fillna(0))
-        
-        # === CONTEXTE DE COURSE ===
-        features['nb_partants'] = df['partant'].max() if 'partant' in df.columns else 16
-        
-        return features.fillna(0)
-    
-    def create_synthetic_labels(self, X, df):
-        """Création de labels synthétiques BASÉS SUR LES PARAMÈTRES"""
-        y_synthetic = np.zeros(len(X))
-        total_weight = 0
-        
-        # Cotes (si activé)
-        if self.params['weight_odds'] > 0 and 'odds_inv' in X.columns:
-            y_synthetic += X['odds_inv'] * self.params['weight_odds']
-            total_weight += self.params['weight_odds']
-        
-        # Historique (si activé)
-        if self.params['weight_historical'] > 0:
-            historical_components = 0
-            historical_count = 0
-            
-            if 'win_rate_cheval' in X.columns:
-                historical_components += X['win_rate_cheval']
-                historical_count += 1
-            
-            if 'music_5' in X.columns:  # win_rate musique
-                historical_components += X['music_5']
-                historical_count += 1
-            
-            if 'recence' in X.columns:
-                historical_components += (1 / (X['recence'] + 1))
-                historical_count += 1
-            
-            if historical_count > 0:
-                y_synthetic += (historical_components / historical_count) * self.params['weight_historical']
-                total_weight += self.params['weight_historical']
-        
-        # Jockey/Entraîneur (si activé)
-        if self.params['weight_jockey'] > 0:
-            jockey_components = 0
-            jockey_count = 0
-            
-            if 'win_rate_jockey' in X.columns:
-                jockey_components += X['win_rate_jockey']
-                jockey_count += 1
-            
-            if 'win_rate_entraineur' in X.columns:
-                jockey_components += X['win_rate_entraineur']
-                jockey_count += 1
-            
-            if jockey_count > 0:
-                y_synthetic += (jockey_components / jockey_count) * self.params['weight_jockey']
-                total_weight += self.params['weight_jockey']
-        
-        # Position (toujours inclus - poids résiduel)
-        position_weight = 1.0 - total_weight
-        if position_weight > 0 and 'num_corde' in X.columns:
-            y_synthetic += (1 / (X['num_corde'] + 1)) * position_weight
-        
-        # Normalisation
-        if y_synthetic.max() > y_synthetic.min():
-            y_synthetic = (y_synthetic - y_synthetic.min()) / (y_synthetic.max() - y_synthetic.min())
-        
-        # Bruit pour éviter le surapprentissage
-        y_synthetic += np.random.normal(0, 0.02, len(y_synthetic))
-        
-        return np.clip(y_synthetic, 0, 1)
-    
-    def train_ensemble_model(self, X, y):
-        """Entraînement de l'ensemble de modèles"""
-        if len(self.base_models) == 0 and not self.params['use_nn']:
-            st.error("❌ Aucun modèle sélectionné !")
-            return
-        
-        X_scaled = self.scaler.fit_transform(X)
-        
-        # Validation croisée seulement si assez de données
-        if len(X) >= 10:
-            kf = KFold(n_splits=min(5, len(X)), shuffle=True, random_state=42)
-            
-            for name, model in self.base_models.items():
-                try:
-                    scores = cross_val_score(model, X_scaled, y, cv=kf, scoring='r2')
-                    self.cv_scores[name] = {
-                        'mean': scores.mean(),
-                        'std': scores.std(),
-                        'scores': scores
-                    }
-                    model.fit(X_scaled, y)
-                except Exception as e:
-                    st.warning(f"⚠️ Erreur modèle {name}: {e}")
-        
-        # Entraînement direct si pas assez de données pour CV
-        else:
-            for name, model in self.base_models.items():
-                try:
-                    model.fit(X_scaled, y)
-                    # Prédiction pour calcul R²
-                    pred = model.predict(X_scaled)
-                    r2 = r2_score(y, pred)
-                    self.cv_scores[name] = {
-                        'mean': r2,
-                        'std': 0,
-                        'scores': [r2]
-                    }
-                except Exception as e:
-                    st.warning(f"⚠️ Erreur modèle {name}: {e}")
-        
-        # Réseau neuronal
-        if self.params['use_nn'] and len(X) >= 8:
-            try:
-                self.nn_model = self.build_neural_network(X_scaled.shape[1])
-                if self.nn_model:
-                    # Pour petites datasets, on utilise tous les données
-                    if len(X) < 20:
-                        history = self.nn_model.fit(
-                            X_scaled, y,
-                            epochs=50,
-                            batch_size=8,
-                            verbose=0,
-                            validation_split=0.2
-                        )
-                    else:
-                        X_train, X_val, y_train, y_val = train_test_split(
-                            X_scaled, y, test_size=0.2, random_state=42
-                        )
-                        
-                        early_stop = EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True)
-                        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=8)
-                        
-                        history = self.nn_model.fit(
-                            X_train, y_train,
-                            validation_data=(X_val, y_val),
-                            epochs=100,
-                            batch_size=16,
-                            callbacks=[early_stop, reduce_lr],
-                            verbose=0
-                        )
-                    
-                    # Évaluation
-                    nn_pred = self.nn_model.predict(X_scaled, verbose=0).flatten()
-                    nn_r2 = r2_score(y, nn_pred)
-                    self.cv_scores['neural_network'] = {
-                        'mean': nn_r2,
-                        'std': 0,
-                        'scores': [nn_r2]
-                    }
-                    
-            except Exception as e:
-                st.warning(f"⚠️ Erreur réseau neuronal: {e}")
-                self.nn_model = None
-        
-        self.is_trained = True
-    
-    def predict(self, X):
-        """Prédiction avec pondération des modèles"""
-        if not self.is_trained or (len(self.base_models) == 0 and self.nn_model is None):
-            return np.zeros(len(X)), np.zeros(len(X))
-        
-        X_scaled = self.scaler.transform(X)
-        predictions = []
-        weights = []
-        
-        # Prédictions des modèles de base
-        for name, model in self.base_models.items():
-            try:
-                pred = model.predict(X_scaled)
-                predictions.append(pred)
-                # Poids basé sur performance R²
-                model_r2 = max(0, self.cv_scores.get(name, {'mean': 0.5})['mean'])
-                weights.append(model_r2)
-            except Exception as e:
-                st.warning(f"⚠️ Prédiction échouée pour {name}: {e}")
-        
-        # Prédiction réseau neuronal
-        if self.nn_model is not None:
-            try:
-                nn_pred = self.nn_model.predict(X_scaled, verbose=0).flatten()
-                predictions.append(nn_pred)
-                nn_r2 = max(0, self.cv_scores.get('neural_network', {'mean': 0.5})['mean'])
-                weights.append(nn_r2)
-            except Exception as e:
-                st.warning(f"⚠️ Prédiction NN échouée: {e}")
-        
-        if not predictions:
-            return np.zeros(len(X)), np.zeros(len(X))
-        
-        # Conversion en array numpy
-        predictions = np.array(predictions)
-        weights = np.array(weights)
-        
-        # Éviter division par zéro
-        if weights.sum() == 0:
-            weights = np.ones(len(weights))
-        
-        weights = weights / weights.sum()
-        
-        # Moyenne pondérée
-        final_predictions = np.average(predictions, axis=0, weights=weights)
-        
-        # Confiance basée sur variance des prédictions
-        confidence = 1 / (1 + np.std(predictions, axis=0))
-        
-        return final_predictions, confidence
+# -------------------------
+# Helpers : feature extraction, weight parsing
+# -------------------------
+def extract_music_features(music):
+    if pd.isna(music) or music == "":
+        return {'win_rate': 0.0, 'place_rate': 0.0, 'recent_form': 0.0, 'total_races': 0}
+    s = str(music)
+    positions = [int(ch) for ch in s if ch.isdigit() and int(ch) > 0]
+    if len(positions) == 0:
+        return {'win_rate': 0.0, 'place_rate': 0.0, 'recent_form': 0.0, 'total_races': 0}
+    total = len(positions)
+    wins = positions.count(1)
+    places = sum(1 for p in positions if p <= 3)
+    recent = positions[:3]
+    recent_form = sum(1/p for p in recent) / len(recent) if len(recent) > 0 else 0.0
+    return {
+        'win_rate': wins / total,
+        'place_rate': places / total,
+        'recent_form': recent_form,
+        'total_races': total
+    }
 
-def load_and_prepare_csv_data(uploaded_file):
-    """Chargement et préparation des données CSV"""
+def safe_float(x, default=0.0):
     try:
-        df = pd.read_csv(uploaded_file)
-        st.success(f"✅ Fichier chargé: {len(df)} chevaux détectés")
-        return df
+        return float(str(x).replace(',', '.'))
+    except:
+        return default
+
+def extract_weight(poids_str):
+    if pd.isna(poids_str):
+        return 60.0
+    m = re.search(r'(\d+(?:[.,]\d+)?)', str(poids_str))
+    return float(m.group(1).replace(',', '.')) if m else 60.0
+
+# -------------------------
+# File / model paths
+# -------------------------
+MODEL_PATH = "hippo_model.h5"
+SCALER_PATH = "hippo_scaler.joblib"
+CALIB_PATH = "hippo_calibrator.joblib"
+
+# -------------------------
+# UI : Load data
+# -------------------------
+st.title("🏇 Analyseur Hippique IA Pro v3 — Deep Learning + Calibration")
+st.caption("But : prédire la probabilité de podium (arrivée ≤ 3) — modèle supervisé, calibré et sauvegardable.")
+
+col_a, col_b = st.columns([2,1])
+with col_a:
+    uploaded = st.file_uploader("Charger un CSV (colonnes recommandées: Nom, Cote, Poids, Musique, Age, Sexe, Driver, Hippodrome, Distance, Terrain, Resultat)", type=["csv"])
+with col_b:
+    if st.button("Charger exemple"):
+        uploaded = "EXAMPLE"
+
+if uploaded is None:
+    st.info("Charge un fichier ou clique sur 'Charger exemple' pour continuer.")
+    st.stop()
+
+# Example dataset
+if uploaded == "EXAMPLE":
+    df = pd.DataFrame({
+        "Nom": ["Thunder Bolt", "Wind Walker", "Rain Dance", "Ocean Wave", "Storm King", "Fire Dancer", "Lightning Star"],
+        "Cote": [3.2, 4.8, 7.5, 6.2, 9.1, 12.5, 15.0],
+        "Poids": ['56.5','57.0','58.5','59.0','57.5','60.0','61.5'],
+        "Musique": ['1a2a3a1a','2a1a4a3a','3a3a1a2a','1a4a2a1a','4a2a5a3a','5a3a6a4a','6a5a7a8a'],
+        "Age": [4,5,3,6,4,5,4],
+        "Sexe": ['H','M','F','H','M','H','F'],
+        "Driver": ['Dupont','Martin','Dupont','Leclerc','Martin','Durand','Durand'],
+        "Hippodrome": ['ParisLong','ParisLong','Lyon','Lyon','ParisLong','Nice','Nice'],
+        "Distance": [1500,1500,1600,1500,1500,1600,1500],
+        "Terrain": ['Bon','Bon','Souple','Bon','Bon','Souple','Bon'],
+        "Resultat": [1,2,5,3,6,4,7]
+    })
+else:
+    df = pd.read_csv(uploaded)
+
+st.write(f"✅ {len(df)} lignes chargées")
+st.dataframe(df.head(), use_container_width=True)
+
+# -------------------------
+# Feature engineering
+# -------------------------
+st.subheader("🔧 Préprocessing & Feature Engineering")
+
+# Musique features
+music_df = df['Musique'].apply(extract_music_features).apply(pd.Series)
+df = pd.concat([df.reset_index(drop=True), music_df.reset_index(drop=True)], axis=1)
+
+# Numeric conversions
+df['odds'] = df['Cote'].apply(lambda x: safe_float(x, default=np.nan))
+df['odds'].fillna(df['odds'].median(), inplace=True)
+df['odds_inv'] = 1.0 / (df['odds'] + 0.1)
+
+df['weight_kg'] = df.get('Poids', df.get('Poids', '')).apply(extract_weight) if 'Poids' in df.columns else 60.0
+df['Age_num'] = df['Age'].apply(lambda x: safe_float(x, default=4)) if 'Age' in df.columns else 4.0
+
+# Jockey/Driver stats (basic aggregation if present)
+if 'Driver' in df.columns:
+    driver_stats = df.groupby('Driver').agg(
+        driver_races = ('Nom','count'),
+        driver_wins = (lambda s: (df.loc[s.index,'Resultat'] == 1).sum()) if 'Resultat' in df.columns else ('Nom','count')
+    )
+    # compute driver win rate per driver and map
+    driver_win_rate = {}
+    for driver, group in df.groupby('Driver'):
+        res = group.get('Resultat', pd.Series(dtype=int))
+        wins = (res == 1).sum() if 'Resultat' in group else 0
+        tot = len(group)
+        driver_win_rate[driver] = wins / tot if tot>0 else 0.0
+    df['driver_win_rate'] = df['Driver'].map(driver_win_rate).fillna(0.0)
+else:
+    df['driver_win_rate'] = 0.0
+
+# Hippodrome stats (if historical included)
+if 'Hippodrome' in df.columns and 'Resultat' in df.columns:
+    hippo_win_rate = {}
+    for hip, group in df.groupby('Hippodrome'):
+        wins = (group['Resultat'] == 1).sum()
+        tot = len(group)
+        hippo_win_rate[hip] = wins / tot if tot>0 else 0.0
+    df['hippo_win_rate'] = df['Hippodrome'].map(hippo_win_rate).fillna(0.0)
+else:
+    df['hippo_win_rate'] = 0.0
+
+# Target
+if 'Resultat' not in df.columns:
+    st.error("La colonne 'Resultat' est requise pour l'entraînement (valeur entière du rang).")
+    st.stop()
+df['target'] = (df['Resultat'] <= 3).astype(int)
+
+# Build feature set (extendable)
+base_features = [
+    'odds_inv', 'win_rate', 'place_rate', 'recent_form',
+    'weight_kg', 'Age_num', 'driver_win_rate', 'hippo_win_rate', 'Distance'
+]
+# keep only features present
+features = [f for f in base_features if f in df.columns]
+st.write("Features utilisées :", features)
+
+X = df[features].fillna(0.0)
+y = df['target']
+
+# -------------------------
+# Correlation-based selection (simple automatic pruning)
+# -------------------------
+corr = pd.concat([X, y], axis=1).corr()['target'].drop('target').abs().sort_values(ascending=False)
+st.subheader("📈 Corrélations absolues (avec target)")
+st.dataframe(corr.to_frame("abs_corr"), use_container_width=True)
+
+# keep features with abs(corr) > threshold or top-k
+corr_thresh = st.slider("Seuil corrélation minimale (abs)", min_value=0.0, max_value=0.5, value=0.01, step=0.01)
+selected_feats = corr[corr >= corr_thresh].index.tolist()
+if len(selected_feats) == 0:
+    selected_feats = corr.index.tolist()[:min(6, len(corr.index))]
+st.info(f"Features retenues pour le modèle: {selected_feats}")
+X = X[selected_feats]
+
+# -------------------------
+# Split / Standardize
+# -------------------------
+test_size = st.slider("Fraction test (%)", min_value=10, max_value=40, value=25, step=5)
+X_train, X_val, y_train, y_val = train_test_split(X.values, y.values, test_size=test_size/100.0, random_state=42, stratify=y.values)
+
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_val = scaler.transform(X_val)
+
+# offer to load existing model
+model_exists = os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH)
+st.write("Modèle existant :", "Oui" if model_exists else "Non")
+if model_exists:
+    if st.button("Charger modèle existant"):
+        try:
+            model = load_model(MODEL_PATH)
+            scaler = joblib.load(SCALER_PATH)
+            if os.path.exists(CALIB_PATH):
+                calibrator = joblib.load(CALIB_PATH)
+            else:
+                calibrator = None
+            st.success("Modèle & scaler chargés.")
+        except Exception as e:
+            st.error(f"Erreur chargement: {e}")
+            model = None
+            calibrator = None
+else:
+    model = None
+    calibrator = None
+
+# -------------------------
+# Build / Train Keras model (if requested)
+# -------------------------
+st.subheader("⚙️ Modèle Deep Learning")
+
+train_model_button = st.button("📡 Entraîner modèle DL maintenant")
+if train_model_button:
+    input_dim = X_train.shape[1]
+    # Define model architecture (tunable)
+    def build_model(input_dim, units1=64, units2=32, dropout=0.2):
+        m = Sequential()
+        m.add(Dense(units1, activation='relu', input_shape=(input_dim,)))
+        m.add(BatchNormalization())
+        m.add(Dropout(dropout))
+        m.add(Dense(units2, activation='relu'))
+        m.add(BatchNormalization())
+        m.add(Dropout(dropout))
+        m.add(Dense(1, activation='sigmoid'))
+        m.compile(optimizer='adam', loss='binary_crossentropy', metrics=[tf.keras.metrics.AUC(name='auc')])
+        return m
+
+    model = build_model(input_dim=input_dim,
+                        units1=st.slider("Units couche 1", 32, 256, 64, step=32),
+                        units2=st.slider("Units couche 2", 16, 128, 32, step=16),
+                        dropout=st.slider("Dropout", 0.0, 0.5, 0.2, step=0.05))
+    st.write(model.summary())
+
+    # callbacks
+    early = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1)
+
+    # fit
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_val, y_val),
+        epochs=200,
+        batch_size= st.slider("Batch size", 8, 64, 16, step=8),
+        callbacks=[early],
+        verbose=1
+    )
+
+    # save model + scaler
+    model.save(MODEL_PATH)
+    joblib.dump(scaler, SCALER_PATH)
+    st.success("✅ Modèle entraîné et sauvegardé (model.h5 & scaler.joblib).")
+
+    # Evaluate on validation
+    y_val_pred = model.predict(X_val).ravel()
+    auc_val = roc_auc_score(y_val, y_val_pred) if len(np.unique(y_val))>1 else float('nan')
+    logloss_val = log_loss(y_val, np.clip(y_val_pred, 1e-6, 1-1e-6))
+    st.write(f"Validation AUC: {auc_val:.4f} | LogLoss: {logloss_val:.4f}")
+
+    # Calibration (Platt scaling) : logistic regression mapping raw predicted prob -> calibrated prob
+    do_cal = st.checkbox("Appliquer calibration Platt (recommandé)", value=True)
+    calibrator = None
+    if do_cal:
+        # train calibrator on validation predictions
+        lr = LogisticRegression(max_iter=500)
+        lr.fit(y_val_pred.reshape(-1,1), y_val)
+        joblib.dump(lr, CALIB_PATH)
+        calibrator = lr
+        st.success("✅ Calibrateur entraîné et sauvegardé (Platt).")
+        # Evaluate calibrated
+        y_val_cal = lr.predict_proba(y_val_pred.reshape(-1,1))[:,1]
+        auc_cal = roc_auc_score(y_val, y_val_cal) if len(np.unique(y_val))>1 else float('nan')
+        logloss_cal = log_loss(y_val, np.clip(y_val_cal,1e-6,1-1e-6))
+        st.write(f"Après calibration — AUC: {auc_cal:.4f} | LogLoss: {logloss_cal:.4f}")
+
+# -------------------------
+# Predict & Score current data
+# -------------------------
+st.subheader("📊 Prédictions & Classement")
+
+if model is None:
+    st.info("Aucun modèle disponible — entraîne un modèle pour obtenir des prédictions.")
+    st.stop()
+
+# prepare entire X for predictions using saved scaler
+X_all = X.values
+X_all_scaled = scaler.transform(X_all)
+
+raw_preds = model.predict(X_all_scaled).ravel()  # probabilities (before calibration)
+if 'calibrator' in locals() and calibrator is not None:
+    preds = calibrator.predict_proba(raw_preds.reshape(-1,1))[:,1]
+else:
+    # attempt to load calibrator from disk if exists
+    if os.path.exists(CALIB_PATH):
+        calibrator = joblib.load(CALIB_PATH)
+        preds = calibrator.predict_proba(raw_preds.reshape(-1,1))[:,1]
+    else:
+        preds = raw_preds
+
+df['score_pred'] = preds
+df['rank_pred'] = df['score_pred'].rank(ascending=False)
+df_sorted = df.sort_values('rank_pred').reset_index(drop=True)
+
+st.dataframe(df_sorted[['Nom','Cote','score_pred','rank_pred']].round(3), use_container_width=True)
+
+# Metrics on train/val if available
+st.subheader("📈 Diagnostics rapides")
+# Compute AUC on full dataset if possible
+if len(df['target'].unique())>1:
+    try:
+        auc_all = roc_auc_score(df['target'], df['score_pred'])
+        st.metric("AUC (sur dataset chargé)", f"{auc_all:.3f}")
+    except Exception:
+        st.info("Impossible de calculer l'AUC (peut nécessiter >=2 classes)")
+
+# Permutation importance (model-agnostic using predictions)
+st.markdown("**Importance approximative (permutation sur features retenues)**")
+try:
+    # use a small subset to compute permutation importance (expensive otherwise)
+    sample_idx = np.random.choice(len(X_all_scaled), size=min(200, len(X_all_scaled)), replace=False)
+    X_sample = X_all_scaled[sample_idx]
+    y_sample = df['target'].values[sample_idx]
+    # wrapper predict function mapping X->pred probability
+    def predict_fn(x):
+        return model.predict(x).ravel()
+    # permutation via sklearn requires estimator API; we'll approximate by permuting columns and checking drop in AUC
+    base_auc = roc_auc_score(y_sample, model.predict(X_sample).ravel()) if len(np.unique(y_sample))>1 else np.nan
+    imp = []
+    for i, feat in enumerate(selected_feats):
+        X_perm = X_sample.copy()
+        np.random.shuffle(X_perm[:, i])
+        auc_perm = roc_auc_score(y_sample, model.predict(X_perm).ravel()) if len(np.unique(y_sample))>1 else np.nan
+        drop = base_auc - auc_perm if (not np.isnan(base_auc) and not np.isnan(auc_perm)) else 0.0
+        imp.append((feat, max(drop,0.0)))
+    imp_df = pd.DataFrame(imp, columns=['feature','auc_drop']).sort_values('auc_drop', ascending=False)
+    st.dataframe(imp_df, use_container_width=True)
+except Exception as e:
+    st.info(f"Permutation importance impossible: {e}")
+
+# Top 5 display
+st.subheader("🥇 Top 5 pronostics")
+for i, r in df_sorted.head(5).iterrows():
+    st.markdown(f"**{i+1}. {r['Nom']}** — Cote: {r.get('Cote', 'NA')} — Prob(podium): **{r['score_pred']:.3f}**")
+
+# -------------------------
+# Export
+# -------------------------
+st.subheader("💾 Exporter / Sauvegarder")
+csv_output = df_sorted.to_csv(index=False)
+st.download_button("Télécharger pronostics (CSV)", csv_output, file_name=f"pronostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+
+if st.button("Sauvegarder modèle & scaler (explicit)"):
+    try:
+        model.save(MODEL_PATH)
+        joblib.dump(scaler, SCALER_PATH)
+        st.success("Modèle et scaler sauvegardés.")
     except Exception as e:
-        st.error(f"❌ Erreur de chargement: {e}")
-        return None
+        st.error(f"Erreur sauvegarde: {e}")
 
-def display_parameter_status(params):
-    """Affiche le statut des paramètres"""
-    st.subheader("🎛️ Paramètres Actifs")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        odds_status = "🟢 ACTIF" if params['weight_odds'] > 0 else "🔴 INACTIF"
-        st.markdown(f"**Cotes**: {odds_status} ({params['weight_odds']:.0%})")
-    
-    with col2:
-        hist_status = "🟢 ACTIF" if params['weight_historical'] > 0 else "🔴 INACTIF"
-        st.markdown(f"**Historique**: {hist_status} ({params['weight_historical']:.0%})")
-    
-    with col3:
-        jockey_status = "🟢 ACTIF" if params['weight_jockey'] > 0 else "🔴 INACTIF"
-        st.markdown(f"**Jockey**: {jockey_status} ({params['weight_jockey']:.0%})")
-    
-    # Modèles activés
-    st.markdown("**🧠 Modèles**: " + ", ".join([
-        "RF" if params['use_rf'] else "",
-        "GB" if params['use_gb'] else "", 
-        "Ridge" if params['use_ridge'] else "",
-        "Elastic" if params['use_elastic'] else "",
-        "NN" if params['use_nn'] else ""
-    ]).strip(", "))
+st.info("Fin du pipeline. Pour apprentissage continu: charger de nouvelles courses (CSV), réentraîner sur l'ensemble historique consolidé, puis sauvegarder le modèle mis à jour.")
 
-def main():
-    st.markdown('<h1 class="main-header">🏇 Analyseur Hippique IA Pro+</h1>', unsafe_allow_html=True)
-    st.markdown("*Deep Learning & Analyse Prédictive Avancée*")
-    
-    # ==================== SIDEBAR AVEC PARAMÈTRES LIÉS ====================
-    with st.sidebar:
-        st.header("⚙️ Configuration des Poids")
-        
-        # Stocker les valeurs dans des variables qui SONT utilisées
-        weight_odds = st.slider("🎯 Poids des Cotes", 0.0, 1.0, 0.45, 0.05, 
-                               help="Influence des cotes directes et probables")
-        
-        weight_historical = st.slider("📊 Poids Historique", 0.0, 1.0, 0.10, 0.05,
-                                     help="Influence des performances passées du cheval")
-        
-        weight_jockey = st.slider("👨 Poids Jockey/Entraîneur", 0.0, 1.0, 0.25, 0.05,
-                                 help="Influence des statistiques jockey et entraîneur")
-        
-        # Vérification cohérence des poids
-        total_weights = weight_odds + weight_historical + weight_jockey
-        if total_weights > 1.0:
-            st.warning(f"⚠️ Total des poids: {total_weights:.0%} > 100%")
-        elif total_weights < 0.3:
-            st.warning(f"⚠️ Total des poids faible: {total_weights:.0%}")
-        
-        st.header("🧠 Sélection des Modèles")
-        use_rf = st.checkbox("🌲 Random Forest", value=True)
-        use_gb = st.checkbox("📈 Gradient Boosting", value=True) 
-        use_ridge = st.checkbox("📊 Ridge Regression", value=False)
-        use_elastic = st.checkbox("🎯 Elastic Net", value=False)
-        use_nn = st.checkbox("🧠 Réseau Neuronal", value=True)
-        
-        # Paramètres regroupés
-        params = {
-            'weight_odds': weight_odds,
-            'weight_historical': weight_historical, 
-            'weight_jockey': weight_jockey,
-            'use_rf': use_rf,
-            'use_gb': use_gb,
-            'use_ridge': use_ridge,
-            'use_elastic': use_elastic,
-            'use_nn': use_nn
-        }
-    
-    # ==================== INTERFACE PRINCIPALE ====================
-    tab1, tab2 = st.tabs(["📁 Analyse CSV", "🌐 Analyse URL"])
-    
-    with tab1:
-        st.subheader("📊 Analyse de Fichier CSV")
-        uploaded_file = st.file_uploader("Choisir un fichier CSV", type="csv")
-        
-        if uploaded_file:
-            df = load_and_prepare_csv_data(uploaded_file)
-            
-            if df is not None:
-                # Afficher le statut des paramètres
-                display_parameter_status(params)
-                
-                st.subheader("🔍 Aperçu des Données")
-                st.dataframe(df.head(), use_container_width=True)
-                
-                # Métriques de base
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("🐎 Chevaux", len(df))
-                with col2:
-                    st.metric("📈 Colonnes", len(df.columns))
-                with col3:
-                    if 'cotedirect' in df.columns:
-                        st.metric("🎯 Cote moyenne", f"{df['cotedirect'].mean():.1f}")
-                
-                # Bouton d'analyse
-                if st.button("🚀 Lancer l'Analyse avec les Paramètres", type="primary"):
-                    with st.spinner("🤖 Entraînement des modèles avec vos paramètres..."):
-                        # Initialisation du modèle AVEC les paramètres
-                        ml_model = AdvancedHorseRacingML(params)
-                        
-                        # Préparation des features (respecte les paramètres)
-                        X = ml_model.prepare_advanced_features_from_csv(df)
-                        
-                        # Affichage des features générées
-                        st.info(f"🔧 **{len(X.columns)} features** générées selon vos paramètres")
-                        
-                        # Création des labels (respecte les paramètres)
-                        y = ml_model.create_synthetic_labels(X, df)
-                        
-                        # Entraînement
-                        ml_model.train_ensemble_model(X, y)
-                        
-                        # Prédictions
-                        predictions, confidence = ml_model.predict(X)
-                        
-                        # Résultats
-                        results_df = df.copy()
-                        results_df['score_ia'] = predictions
-                        results_df['confiance'] = confidence
-                        results_df['rang_ia'] = results_df['score_ia'].rank(ascending=False)
-                        
-                        # Affichage des résultats
-                        st.subheader("🏆 Classement Final (avec vos paramètres)")
-                        
-                        # Top 10
-                        display_cols = ['cheval', 'cotedirect', 'score_ia', 'confiance', 'rang_ia']
-                        if 'jockey' in results_df.columns:
-                            display_cols.append('jockey')
-                        
-                        top_10 = results_df.nlargest(10, 'score_ia')[display_cols]
-                        
-                        for idx, row in top_10.iterrows():
-                            conf = row['confiance']
-                            if conf > 0.7:
-                                conf_emoji, conf_class = "🟢", "confidence-high"
-                            elif conf > 0.5:
-                                conf_emoji, conf_class = "🟡", "confidence-medium" 
-                            else:
-                                conf_emoji, conf_class = "🔴", "confidence-low"
-                            
-                            jockey_info = f" | 👨 {row['jockey']}" if 'jockey' in row else ""
-                            
-                            st.markdown(f"""
-                            <div class="prediction-box">
-                                <strong>{int(row['rang_ia'])}. {row['cheval']}</strong>{jockey_info}<br>
-                                📊 Cote: <strong>{row['cotedirect']}</strong> | 
-                                🎯 Score: <strong>{row['score_ia']:.3f}</strong> | 
-                                {conf_emoji} Confiance: <span class="{conf_class}">{conf:.1%}</span>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        # Métriques de performance
-                        st.subheader("📈 Performance des Modèles")
-                        if ml_model.cv_scores:
-                            cols = st.columns(len(ml_model.cv_scores))
-                            for idx, (name, scores) in enumerate(ml_model.cv_scores.items()):
-                                with cols[idx % len(cols)]:
-                                    emoji = "🌲" if "forest" in name else "📈" if "boost" in name else "🧠" if "neural" in name else "📊"
-                                    st.metric(f"{emoji} {name}", f"{scores['mean']:.3f}")
-                        
-                        # Impact des paramètres
-                        st.subheader("🔍 Impact de Vos Paramètres")
-                        param_impact = pd.DataFrame({
-                            'Paramètre': ['Cotes', 'Historique', 'Jockey/Entraîneur'],
-                            'Poids': [params['weight_odds'], params['weight_historical'], params['weight_jockey']],
-                            'Statut': ['🟢 Actif' if w > 0 else '🔴 Inactif' for w in 
-                                      [params['weight_odds'], params['weight_historical'], params['weight_jockey']]]
-                        })
-                        
-                        st.dataframe(param_impact, use_container_width=True)
-                        
-                        # Exporter les résultats
-                        st.subheader("💾 Exporter les Résultats")
-                        csv_data = results_df.to_csv(index=False)
-                        st.download_button(
-                            "📄 Télécharger CSV",
-                            csv_data,
-                            f"pronostics_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                            "text/csv"
-                        )
-    
-    with tab2:
-        st.subheader("🌐 Analyse par URL")
-        st.info("Fonctionnalité en développement...")
+# -------------------------
+# Short explanation of approach & math
+# -------------------------
+st.markdown("---")
+st.header("🔬 Notes méthodologiques (résumé)")
+st.markdown("""
+**Architecture** : réseau dense (2 couches cachées) → activation ReLU → dropout & batchnorm → sortie sigmoïde.
 
-if __name__ == "__main__":
-    main()
+**Loss** : binary_crossentropy → minimise la log-vraisemblance négative, donc adapte probabilités.
+
+**Calibration (Platt)** : le réseau produit p̂. On entraîne une régression logistique simple `sigma(a * p̂ + b)` sur un jeu de validation pour corriger biais de probabilité (sur/sous-confiance).  
+Ceci donne `p_cal = logistic( a * p̂ + b )`.
+
+**Pourquoi c'est meilleur** :
+* Le réseau apprend automatiquement interactions non-linéaires (ex : poids × distance).
+* La calibration corrige la tendance d'un modèle à être mal-calibré.
+* La sélection par corrélation et la standardisation limitent le bruit et stabilisent l'entraînement.
+
+**Recommandations** :
+1. Entraîner sur un historique large (des milliers de courses) pour que le réseau généralise.
+2. Ajouter features jockey/driver historiques et hippodrome (si disjointes par course, stocker historique séparé).
+3. Vérifier l'équilibre classes (si peu de podiums, user stratified sampling ou sur-échantillonnage).
+4. Logger chaque course et réentraîner périodiquement (ex: nightly) pour apprentissage continu.
+""")
