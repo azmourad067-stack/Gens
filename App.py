@@ -1,19 +1,4 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-...
-        👆 **Chargez des données pour voir le nouveau système en action !**
-        """)
 
-if __name__ == "__main__":
-    main()
-Tool Call
-Function Name:
-Write
-Arguments:
-file_path:
-/home/user/pronostic_hippique_advanced_ml.py
-content:
 import streamlit as st
 import pandas as pd
 import numpy as np
