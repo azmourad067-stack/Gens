@@ -1764,5 +1764,3 @@ Générées le: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 if __name__ == "__main__":
     main()
-Response
-Created file /home/user/pronostic_hippique_advanced_ml.py (71007 characters)
