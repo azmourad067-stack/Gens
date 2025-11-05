@@ -1,19 +1,5 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
-...
-        </div>
-        """, unsafe_allow_html=True)
 
-if __name__ == "__main__":
-    main()
-Tool Call
-Function Name:
-Write
-Arguments:
-file_path:
-/home/user/streamlit_horse_analyzer.py
-content:
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
@@ -773,5 +759,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-Response
-Created file /home/user/streamlit_horse_analyzer.py (30300 characters)
